@@ -46,7 +46,6 @@ OldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
 				SafeSetCore("SendNotification", {
 					Title = "Exunys Developer - Anti-Kick",
 					Text = "Intercepted kick via __namecall.",
-					Icon = "rbxassetid://6238540373",
 					Duration = 2
 				})
 			end
@@ -68,7 +67,6 @@ OldKick = hookfunction(LocalPlayer.Kick, newcclosure(function(self, ...)
 				SafeSetCore("SendNotification", {
 					Title = "Exunys Developer - Anti-Kick",
 					Text = "Intercepted kick via direct method.",
-					Icon = "rbxassetid://6238540373",
 					Duration = 2
 				})
 			end
@@ -84,7 +82,6 @@ if getgenv().ED_AntiKick.SendNotifications then
 	SafeSetCore("SendNotification", {
 		Title = "Exunys Developer - Anti-Kick",
 		Text = "Anti-Kick script loaded!",
-		Icon = "rbxassetid://6238537240",
 		Duration = 3
 	})
 end
