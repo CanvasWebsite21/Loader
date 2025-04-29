@@ -1,466 +1,90 @@
---// Enhanced Anti-Kick & Anti-Disconnect
---// Cache functions for better performance and security
-local getgenv, getnamecallmethod, hookmetamethod, hookfunction, newcclosure, checkcaller = getgenv, getnamecallmethod, hookmetamethod, hookfunction, newcclosure, checkcaller
-local lower, gsub, match, find = string.lower, string.gsub, string.match, string.find
-local rawget, rawset, setmetatable, getmetatable, type, typeof = rawget, rawset, setmetatable, getmetatable, type, typeof
-local task_wait = task.wait
+--// Cache
+local getgenv, getnamecallmethod, hookmetamethod, hookfunction, newcclosure, checkcaller =
+      getgenv, getnamecallmethod, hookmetamethod, hookfunction, newcclosure, checkcaller
+local lower, gsub, match = string.lower, string.gsub, string.match
 
 --// Already loaded check
-if getgenv().Enhanced_AntiKick then
-    return getgenv().Enhanced_AntiKick.Status("Script is already running!")
-end
+if getgenv().ED_AntiKick then return end
 
---// Enhanced reference protection
+--// Utilities
 local cloneref = cloneref or function(...) return ... end
 local clonefunction = clonefunction or function(...) return ... end
 
---// Important game services
 local Players = cloneref(game:GetService("Players"))
 local LocalPlayer = cloneref(Players.LocalPlayer)
 local StarterGui = cloneref(game:GetService("StarterGui"))
-local NetworkClient = cloneref(game:GetService("NetworkClient"))
-local TeleportService = cloneref(game:GetService("TeleportService"))
-local GuiService = cloneref(game:GetService("GuiService"))
-local RunService = cloneref(game:GetService("RunService"))
 
---// Core functions
-local SetCore = clonefunction(StarterGui.SetCore)
-local FindFirstChild = clonefunction(game.FindFirstChild)
-local GetChildren = clonefunction(game.GetChildren)
-local IsA = clonefunction(game.IsA)
-local Destroy = clonefunction(game.Destroy)
-local Disconnect = clonefunction(game.Loaded.Connect(function() end).Disconnect)
-
---// Instance comparison function
-local CompareInstances = CompareInstances or function(Instance1, Instance2)
-    return (typeof(Instance1) == "Instance" and typeof(Instance2) == "Instance" and Instance1 == Instance2)
+local SafeSetCore = function(...)
+	local ok, err = pcall(clonefunction(StarterGui.SetCore), StarterGui, ...)
+	if not ok then warn("SetCore failed:", err) end
 end
 
---// Function to check if argument can be cast to string
+local CompareInstances = CompareInstances or function(a, b)
+	return typeof(a) == "Instance" and typeof(b) == "Instance" and a == b
+end
+
 local CanCastToSTDString = function(...)
-    return pcall(FindFirstChild, game, ...)
+	return pcall(clonefunction(game.FindFirstChild), game, ...)
 end
 
---// Enhanced notification system
-local function SendNotification(title, text, duration)
-    pcall(function()
-        SetCore(StarterGui, "SendNotification", {
-            Title = title or "Enhanced Anti-Kick",
-            Text = text or "",
-            Icon = "rbxassetid://6238540373",
-            Duration = duration or 3
-        })
-    end)
-end
-
---// Global configuration
-getgenv().Enhanced_AntiKick = {
-    Enabled = true,                  -- Master toggle for all protections
-    SendNotifications = true,        -- Display notifications for blocked events
-    CheckCaller = true,              -- Prevent kicks from other scripts
-    PreventTeleports = true,         -- Block forced teleports
-    PreventNetworkDisconnects = true, -- Block network disconnections
-    PreventGuiKicks = true,          -- Block GUI-based kicks
-    ProtectConnection = true,        -- Protect connection from being dropped
-    SecureMode = true,               -- Additional security measures
-    BlockRemotes = true,             -- Block suspicious remote events
-    DisableProtectionKeywords = {"disable", "off", "false"}, -- Keywords to disable protection
-    
-    -- Hook strength levels
-    DeepHook = true,                 -- Use deep hook methods (more detectable but stronger)
-    LayeredProtection = true,        -- Use multiple protection layers
-    
-    -- Log functions
-    Log = function(message)
-        if getgenv().Enhanced_AntiKick.SendNotifications then
-            SendNotification("Protection Log", message, 3)
-        end
-        print("[Enhanced Anti-Kick] " .. message)
-    end,
-    
-    Status = function(message)
-        SendNotification("Status Update", message, 3)
-        return false
-    end,
-    
-    -- Detection counter
-    BlockedAttempts = {
-        Kicks = 0,
-        Disconnects = 0,
-        Teleports = 0,
-        Remotes = 0
-    }
+--// Global toggle
+getgenv().ED_AntiKick = {
+	Enabled = true,
+	SendNotifications = true,
+	CheckCaller = true
 }
 
-local Config = getgenv().Enhanced_AntiKick
-
---// Suspicious keywords to detect
-local KickKeywords = {
-    "kick", "ban", "remove", "boot", "expel", "eject"
-}
-
-local DisconnectKeywords = {
-    "disconnect", "close", "drop", "end", "terminate", "kill"
-}
-
---// Helper function to check for suspicious keywords
-local function ContainsSuspiciousKeyword(str, keywords)
-    if type(str) ~= "string" then return false end
-    str = lower(str)
-    
-    for _, keyword in ipairs(keywords) do
-        if find(str, keyword, 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
---// Create protection sentinel (monitors for script tampering)
-local ProtectionSentinel = {}
-if Config.SecureMode then
-    local SentinelMT = {}
-    SentinelMT.__index = function(_, k)
-        Config.Log("Attempt to access sentinel property: " .. tostring(k))
-        return function() end
-    end
-    
-    SentinelMT.__newindex = function(_, k, v)
-        Config.Log("Attempt to modify sentinel property: " .. tostring(k))
-        return
-    end
-    
-    setmetatable(ProtectionSentinel, SentinelMT)
-    
-    -- Connection heartbeat to detect if script is disabled
-    local lastTick = tick()
-    local heartbeatConn
-    
-    -- Safely create heartbeat connection
-    pcall(function()
-        heartbeatConn = RunService.Heartbeat:Connect(function()
-            lastTick = tick()
-        end)
-    end)
-    
-    spawn(function()
-        while Config.Enabled and wait(1) do
-            if tick() - lastTick > 5 then
-                Config.Log("Heartbeat interrupted - attempting recovery")
-                -- Safely disconnect previous connection if it exists
-                if heartbeatConn then 
-                    pcall(function() heartbeatConn:Disconnect() end) 
-                end
-                
-                -- Try to create a new connection
-                pcall(function()
-                    heartbeatConn = RunService.Heartbeat:Connect(function()
-                        lastTick = tick()
-                    end)
-                end)
-            end
-        end
-    end)
-end
-
---// Anti-Kick Implementation (Method 1: __namecall hook)
+--// Hook __namecall
 local OldNamecall
 OldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
-    local self, arg1, arg2 = ...
-    local args = {...}
-    local method = getnamecallmethod()
-    
-    if not Config.Enabled then return OldNamecall(...) end
-    
-    -- Check if this is a kick attempt
-    if ((Config.CheckCaller and not checkcaller()) or true) and CompareInstances(self, LocalPlayer) then
-        -- Direct kick prevention
-        if gsub(method, "^%l", string.upper) == "Kick" and CanCastToSTDString(arg1) then
-            Config.BlockedAttempts.Kicks = Config.BlockedAttempts.Kicks + 1
-            Config.Log("Blocked kick attempt via " .. method .. " [" .. tostring(arg1) .. "]")
-            return
-        end
-        
-        -- Check for kick-related methods
-        if ContainsSuspiciousKeyword(method, KickKeywords) then
-            Config.BlockedAttempts.Kicks = Config.BlockedAttempts.Kicks + 1
-            Config.Log("Blocked suspicious method call: " .. method)
-            return
-        end
-    end
-    
-    -- Network disconnect prevention
-    if Config.PreventNetworkDisconnects and CompareInstances(self, NetworkClient) then
-        if method == "Disconnect" or ContainsSuspiciousKeyword(method, DisconnectKeywords) then
-            Config.BlockedAttempts.Disconnects = Config.BlockedAttempts.Disconnects + 1
-            Config.Log("Blocked NetworkClient disconnect attempt")
-            return wait(9e9)
-        end
-    end
-    
-    -- TeleportService blocking (to prevent game kicks via teleport)
-    if Config.PreventTeleports and CompareInstances(self, TeleportService) then
-        local blockMethods = {"Teleport", "TeleportToPlaceInstance", "TeleportPartyAsync"}
-        for _, blockedMethod in ipairs(blockMethods) do
-            if method == blockedMethod then
-                -- Allow only if it's a user-initiated teleport (has a valid teleport GUI)
-                local hasValidGui = false
-                pcall(function()
-                    for _, gui in ipairs(GetChildren(LocalPlayer.PlayerGui)) do
-                        if IsA(gui, "ScreenGui") and gui.Name:find("Teleport") then
-                            hasValidGui = true
-                        end
-                    end
-                end)
-                
-                if not hasValidGui then
-                    Config.BlockedAttempts.Teleports = Config.BlockedAttempts.Teleports + 1
-                    Config.Log("Blocked forced teleport attempt")
-                    return
-                end
-            end
-        end
-    end
-    
-    -- Block suspicious remote events
-    if Config.BlockRemotes and method == "FireServer" or method == "InvokeServer" then
-        if typeof(self) == "Instance" and IsA(self, "RemoteEvent") or IsA(self, "RemoteFunction") then
-            local remoteName = self.Name:lower()
-            if ContainsSuspiciousKeyword(remoteName, KickKeywords) or 
-               ContainsSuspiciousKeyword(remoteName, DisconnectKeywords) then
-                Config.BlockedAttempts.Remotes = Config.BlockedAttempts.Remotes + 1
-                Config.Log("Blocked suspicious remote: " .. self.Name)
-                return
-            end
-            
-            -- Check arguments for kick commands
-            for i, arg in ipairs(args) do
-                if i > 1 and type(arg) == "string" and (
-                   ContainsSuspiciousKeyword(arg, KickKeywords) or
-                   ContainsSuspiciousKeyword(arg, DisconnectKeywords)) then
-                    Config.BlockedAttempts.Remotes = Config.BlockedAttempts.Remotes + 1
-                    Config.Log("Blocked remote with suspicious argument")
-                    return
-                end
-            end
-        end
-    end
-    
-    return OldNamecall(...)
+	local self, arg = ...
+	local method = lower(getnamecallmethod() or "")
+
+	if getgenv().ED_AntiKick.Enabled and method == "kick" and CompareInstances(self, LocalPlayer) then
+		if not getgenv().ED_AntiKick.CheckCaller or not checkcaller() then
+			if getgenv().ED_AntiKick.SendNotifications then
+				SafeSetCore("SendNotification", {
+					Title = "Exunys Developer - Anti-Kick",
+					Text = "Intercepted kick via __namecall.",
+					Icon = "rbxassetid://6238540373",
+					Duration = 2
+				})
+			end
+			return -- Block kick
+		end
+	end
+
+	return OldNamecall(...)
 end))
 
---// Anti-Kick Implementation (Method 2: Direct function hooks)
-local OriginalFunctions = {}
+--// Hook Kick method directly
+local OldKick
+OldKick = hookfunction(LocalPlayer.Kick, newcclosure(function(self, ...)
+	local message = ...
 
--- Hook key functions
-local function SafeHookFunction(target, replacement)
-    if type(target) ~= "function" then return end
-    
-    local success, result = pcall(function()
-        local original = hookfunction(target, replacement)
-        return original
-    end)
-    
-    if success then
-        return result
-    end
-    return target
+	if getgenv().ED_AntiKick.Enabled and CompareInstances(self, LocalPlayer) then
+		if not getgenv().ED_AntiKick.CheckCaller or not checkcaller() then
+			if getgenv().ED_AntiKick.SendNotifications then
+				SafeSetCore("SendNotification", {
+					Title = "Exunys Developer - Anti-Kick",
+					Text = "Intercepted kick via direct method.",
+					Icon = "rbxassetid://6238540373",
+					Duration = 2
+				})
+			end
+			return -- Block kick
+		end
+	end
+
+	return OldKick(self, ...)
+end))
+
+--// Initial notification
+if getgenv().ED_AntiKick.SendNotifications then
+	SafeSetCore("SendNotification", {
+		Title = "Exunys Developer - Anti-Kick",
+		Text = "Anti-Kick script loaded!",
+		Icon = "rbxassetid://6238537240",
+		Duration = 3
+	})
 end
-
--- Hook LocalPlayer.Kick
-OriginalFunctions.Kick = SafeHookFunction(LocalPlayer.Kick, function(self, message, ...)
-    if not Config.Enabled then return OriginalFunctions.Kick(self, message, ...) end
-    
-    if ((Config.CheckCaller and not checkcaller()) or true) and CompareInstances(self, LocalPlayer) then
-        if CanCastToSTDString(message) then
-            Config.BlockedAttempts.Kicks = Config.BlockedAttempts.Kicks + 1
-            Config.Log("Blocked direct Kick() call with message: " .. tostring(message))
-            return
-        end
-    end
-    
-    return OriginalFunctions.Kick(self, message, ...)
-end)
-
--- Hook NetworkClient functions
-if Config.PreventNetworkDisconnects then
-    OriginalFunctions.NetworkDisconnect = SafeHookFunction(NetworkClient.Disconnect, function(...)
-        if not Config.Enabled then return OriginalFunctions.NetworkDisconnect(...) end
-        
-        Config.BlockedAttempts.Disconnects = Config.BlockedAttempts.Disconnects + 1
-        Config.Log("Blocked NetworkClient.Disconnect()")
-        return wait(9e9)
-    end)
-end
-
--- TeleportService protection
-if Config.PreventTeleports and Config.DeepHook then
-    local teleportFunctions = {
-        "Teleport", 
-        "TeleportToPlaceInstance", 
-        "TeleportPartyAsync"
-    }
-    
-    for _, funcName in ipairs(teleportFunctions) do
-        local originalFunc = TeleportService[funcName]
-        
-        if typeof(originalFunc) == "function" then
-            OriginalFunctions[funcName] = SafeHookFunction(originalFunc, function(...)
-                if not Config.Enabled then return OriginalFunctions[funcName](...) end
-                
-                -- Allow only local script teleports (likely legitimate)
-                if checkcaller() and getfenv(2).script and 
-                   IsA(getfenv(2).script, "LocalScript") and
-                   FindFirstChild(LocalPlayer.PlayerGui, getfenv(2).script) then
-                    return OriginalFunctions[funcName](...)
-                end
-                
-                Config.BlockedAttempts.Teleports = Config.BlockedAttempts.Teleports + 1
-                Config.Log("Blocked TeleportService." .. funcName .. "()")
-                return
-            end)
-        end
-    end
-end
-
--- GuiService disconnect protection
-if Config.PreventGuiKicks then
-    OriginalFunctions.GuiClose = SafeHookFunction(GuiService.CloseInspectMenu, function(...)
-        if not Config.Enabled then return OriginalFunctions.GuiClose(...) end
-        
-        if not checkcaller() then
-            Config.Log("Blocked potential GUI-based disconnect")
-            return
-        end
-        
-        return OriginalFunctions.GuiClose(...)
-    end)
-end
-
--- Setup protection for key events
-if Config.ProtectConnection and Config.LayeredProtection then
-    -- Protect against connection termination
-    local connectionProtections = {
-        "GameEnded",
-        "ConnectionError",
-        "ConnectionClosed",
-        "ConnectionFailed"
-    }
-    
-    for _, eventName in ipairs(connectionProtections) do
-        spawn(function()
-            -- Safely check if the event exists before connecting
-            local success, event = pcall(function() return Players[eventName] end)
-            
-            if success and event and typeof(event) == "RBXScriptSignal" then
-                -- Connect dummy handler to capture event without allowing disconnect
-                local connection = event:Connect(function(...)
-                    Config.Log("Captured " .. eventName .. " event - preventing disconnect")
-                    task_wait(9e9)
-                end)
-                
-                -- Hook the disconnect method
-                local oldDisconnect = connection.Disconnect
-                connection.Disconnect = function()
-                    Config.Log("Blocked attempt to remove " .. eventName .. " protection")
-                    return
-                end
-            else
-                Config.Log("Note: " .. eventName .. " event not available for protection")
-            end
-        end)
-    end
-end
-
--- Secondary protection for PlayerRemoving event
-spawn(function()
-    if Config.Enabled and Config.LayeredProtection then
-        pcall(function()
-            local connection = Players.PlayerRemoving:Connect(function(player)
-                if player == LocalPlayer then
-                    Config.Log("PlayerRemoving detected - applying emergency protections")
-                    -- Emergency reinstate protections and cancel event
-                    task_wait(0.1)
-                    return false
-                end
-            end)
-            
-            -- Make this connection immune to disconnection
-            if connection then
-                local originalDisconnect = connection.Disconnect
-                connection.Disconnect = newcclosure(function()
-                    Config.Log("Blocked attempt to remove PlayerRemoving protection")
-                    return
-                end)
-            end
-        end)
-    end
-end)
-
--- Command handler for controlling the protection
-local function ProcessCommand(message)
-    if typeof(message) ~= "string" then return end
-    message = message:lower()
-    
-    for _, keyword in ipairs(Config.DisableProtectionKeywords) do
-        if find(message, "antikick " .. keyword) or find(message, "anti kick " .. keyword) or
-           find(message, "protection " .. keyword) then
-            Config.Enabled = false
-            Config.Log("Protection temporarily disabled via command")
-            task_wait(10)
-            Config.Enabled = true
-            Config.Log("Protection automatically re-enabled")
-            return true
-        end
-    end
-    
-    if find(message, "antikick status") or find(message, "anti kick status") then
-        Config.Log("Status: " .. (Config.Enabled and "Active" or "Disabled") .. 
-                   " | Blocked: " .. Config.BlockedAttempts.Kicks .. " kicks, " ..
-                   Config.BlockedAttempts.Disconnects .. " disconnects")
-        return true
-    end
-    
-    return false
-end
-
--- Monitor chat for commands
-spawn(function()
-    if LocalPlayer and LocalPlayer.Character then
-        local function onChat(message)
-            return ProcessCommand(message)
-        end
-        
-        -- Hook into chat events if possible
-        pcall(function()
-            LocalPlayer.Chatted:Connect(onChat)
-        end)
-    end
-end)
-
--- Final protection layer: Restore script if tampered with
-spawn(function()
-    while Config.Enabled and Config.SecureMode and wait(5) do
-        -- Safely check if core functions have been tampered with
-        pcall(function()
-            local currentMetatable = getrawmetatable(game)
-            if currentMetatable and OldNamecall ~= currentMetatable.__namecall then
-                Config.Log("Critical: Namecall hook tampering detected - restoring")
-                -- Attempt to restore hook
-                pcall(function()
-                    OldNamecall = hookmetamethod(game, "__namecall", newcclosure(OldNamecall))
-                end)
-            end
-        end)
-        
-        -- Additional tampering checks can be added here
-    end
-end)
-
--- Startup notification
-if Config.SendNotifications then
-    SendNotification("Enhanced Anti-Kick", "Protection loaded with " .. 
-                    (Config.LayeredProtection and "layered" or "basic") .. " protection.", 5)
-end
-
-return getgenv().Enhanced_AntiKick -- Return the config object for external access
